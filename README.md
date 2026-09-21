@@ -32,5 +32,7 @@ deb2cups решает эту проблему: он не пытается «по
 
 ## Для связи
 Телеграм: https://t.me/avhelpnew
+
 Почта: artemsoft@yahoo.com
+
 Новые версии: https://github.com/artemsoft2025 
