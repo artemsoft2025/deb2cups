@@ -1,0 +1,806 @@
+Справка по deb2cups
+
+deb2cups — установка драйвера принтера из .deb-пакета
+            в RPM-дистрибутив (ALT Linux, Fedora, openSUSE)
+            без использования dpkg
+
+(c) Артем Кашанин, Кострома, 2026
+koscl@yandex.ru
+https://github.com/artemsoft2025
+https://t.me/avhelpnew
+
+
+Лицензия: MIT
+
+Содержание
+Что это
+Зачем это нужно
+Установка
+Быстрый старт
+Синтаксис команды
+Примеры использования
+Что делает утилита
+Что делать после установки драйвера
+Добавление принтера в CUPS
+Проверка и диагностика
+Возможные проблемы
+Удаление и откат
+Часто задаваемые вопросы
+
+1. Что это
+
+deb2cups — утилита для установки драйверов принтеров, которые производитель
+выпускает только в формате .deb (для Ubuntu/Debian), в RPM-дистрибутивы
+(ALT Linux, Fedora, openSUSE, CentOS, RHEL и т.п.).
+
+Утилита:
+Распаковывает .deb-пакет без dpkg.
+Находит в нём фильтры CUPS и PPD-файлы.
+Показывает список поддерживаемых моделей.
+Устанавливает выбранные PPD и фильтры в системные папки CUPS.
+Делает резервную копию перед установкой.
+Проверяет зависимости фильтров через ldd.
+Перезапускает CUPS.
+
+2. Зачем это нужно
+
+Многие производители бюджетных принтеров (Pantum, некоторые Kyocera,
+старые Samsung, Brother) выпускают драйверы только в .deb или .rpm.
+Если у вас RPM-дистрибутив, а драйвер есть только в .deb — стандартный
+dpkg -i не сработает (dpkg в RPM-системе либо отсутствует, либо ругается
+на зависимости вида libc6, которой в RPM-мире нет — там glibc).
+
+deb2cups решает эту проблему: он не пытается «поставить» .deb, а просто
+извлекает из него нужные файлы (фильтры + PPD) и раскладывает их туда,
+откуда CUPS их подхватит.
+
+3. Установка
+
+3.1. Из бинарного файла
+
+chmod +x deb2cups
+
+# Положить в системную папку
+sudo cp deb2cups /usr/local/bin/
+
+# Проверить
+deb2cups --version
+
+Или без установки в систему — просто запускать из текущей папки:
+
+chmod +x deb2cups
+sudo ./deb2cups --version
+
+3.2. Требования
+
+root — для копирования файлов в /usr/lib/cups/filter/ и
+/usr/share/cups/model/.
+
+ar (из пакета binutils) — для распаковки .deb.
+
+CUPS — установленный и работающий (systemctl status cups).
+
+ldd — опционально, для проверки зависимостей фильтров.
+
+Проверить наличие ar:
+
+bash
+which ar
+# /usr/bin/ar
+Если нет:
+
+sudo apt-get install binutils
+
+3.3. Сборка бинарника из исходников (для разработчика)
+
+4. Быстрый старт
+
+Три команды — и всё готово:
+
+# 1. Посмотреть, что вообще есть в пакете
+sudo deb2cups --list pantum.deb
+
+# 2. Установить нужную модель (интерактивно)
+sudo deb2cups pantum.deb
+
+# 3. После установки — открыть CUPS и добавить принтер
+xdg-open http://localhost:631
+# → Administration → Add Printer
+
+5. Синтаксис команды
+
+
+deb2cups [ОПЦИИ] <путь_к_deb>
+
+Опции:
+  -h, --help           Показать справку и выйти
+  --version            Показать версию и выйти
+  --list               Только показать список моделей и выйти
+  --model ИМЯ          Установить конкретную модель (можно несколько раз)
+  -y, --yes            Не спрашивать подтверждение
+  --keep-temp          Не удалять временную папку (для отладки)
+
+Аргументы:
+  путь_к_deb           Путь к .deb-пакету (или .zip с .deb внутри)
+
+6. Примеры использования
+
+6.1. Интерактивная установка (обычный случай)
+
+sudo deb2cups pantum.deb
+
+Утилита:
+Распакует .deb.
+Покажет список из 267 моделей (для Pantum).
+Спросит, какую выбрать.
+Покажет, что будет установлено.
+Спросит подтверждение.
+Установит файлы.
+Перезапустит CUPS.
+
+6.2. Только посмотреть список моделей
+
+sudo deb2cups --list pantum.deb
+
+Вывод:
+
+[i] Распаковываю pantum.deb…
+[i] Фильтров CUPS: 17
+    - CommandFileFilterG2
+    - pantum_r_1700Filter
+    ...
+[i] PPD-файлов: 267
+
+  1. Pantum BM5200ADN Series PS  (Pantum_BM5200ADN_Series_PS.ppd)
+  2. Pantum BM5200ADW Series PS  (Pantum_BM5200ADW_Series_PS.ppd)
+  ...
+231. Pantum P2500W Series        (Pantum_P2500W_Series.ppd)
+232. Pantum P2500 Series         (Pantum_P2500_Series.ppd)
+...
+
+Полезно, чтобы найти точное имя модели:
+
+sudo deb2cups --list pantum.deb | grep -i P2500
+
+6.3. Установка конкретной модели без интерактива
+
+sudo deb2cups --model "Pantum_P2500_Series" pantum.deb
+
+Важно: имя модели — это имя файла PPD без расширения, а не «человекочитаемое»
+название. Например:
+
+В списке: Pantum P2500 Series
+
+В --model: Pantum_P2500_Series (как в имени файла Pantum_P2500_Series.ppd)
+
+Чтобы узнать точное имя файла, используйте --list.
+
+6.4. Несколько моделей сразу
+
+sudo deb2cups \
+    --model "Pantum_P2500_Series" \
+    --model "Pantum_P2500W_Series" \
+    --model "Pantum_P2500NW_Series" \
+    pantum.deb
+
+Установятся все три PPD + общие фильтры.
+
+6.5. Автоматически, без вопросов
+
+sudo deb2cups -y --model "Pantum_P2500_Series" pantum.deb
+Полезно для скриптов и автоматизации.
+
+6.6. Установка из .zip
+Если драйвер скачан как .zip (внутри которого .deb):
+
+sudo deb2cups pantum-driver.zip
+Утилита сама распакует zip, найдёт .deb и продолжит.
+
+6.7. Отладка: оставить временную папку
+
+sudo deb2cups --keep-temp pantum.deb
+Временная папка (обычно /tmp/deb2cups-XXXX) не будет удалена.
+Полезно, если хочется вручную посмотреть, что было внутри .deb.
+
+7. Что делает утилита
+
+7.1. Пошагово
+
+Шаг	Действие
+1	Проверяет, что запущено от root
+2	Если на входе .zip — распаковывает, находит .deb внутри
+3	Распаковывает .deb через ar x + распаковку data.tar.*
+4	Ищет фильтры в usr/lib/cups/filter/
+5	Ищет PPD в usr/share/cups/model/
+6	Показывает список моделей
+7	Спрашивает, какие установить
+8	Делает бэкап существующих файлов в /var/backups/deb2cups/
+9	Копирует фильтры в /usr/lib/cups/filter/ (chmod 755)
+10	Копирует выбранные PPD в /usr/share/cups/model/<бренд>/
+11	Проверяет зависимости фильтров через ldd
+12	Перезапускает CUPS
+13	Показывает инструкцию, что делать дальше
+
+7.2. Куда что кладётся
+
+Что	Откуда (в .deb)	Куда (в системе)
+Фильтры	usr/lib/cups/filter/*	/usr/lib/cups/filter/
+PPD	usr/share/cups/model/**/*.ppd	/usr/share/cups/model/<бренд>/
+Бэкап	—	/var/backups/deb2cups/<timestamp>/
+
+7.3. Что НЕ делает
+
+Не ставит сам принтер в CUPS — это отдельный шаг (см. раздел 9).
+
+Не устанавливает зависимости — только сообщает, каких библиотек не хватает.
+
+Не редактирует printers.conf — CUPS сам подхватит PPD при добавлении.
+
+Не трогает dpkg/apt — работает напрямую с файлами.
+
+8. Что делать после установки драйвера
+
+После успешной работы deb2cups:
+
+PPD и фильтры лежат в системных папках.
+
+CUPS перезапущен и «видит» новый PPD.
+
+Но принтер ещё не добавлен в CUPS. Нужно добавить его вручную.
+
+Способы:
+
+Веб-интерфейс CUPS — http://localhost:631 (рекомендуется).
+
+system-config-printer — графическая утилита.
+
+lpadmin — командная строка.
+
+9. Добавление принтера в CUPS
+Способ добавления зависит от того, как принтер подключён.
+
+9.1. USB-принтер (подключён к этому АРМ)
+Проверка, что принтер виден:
+
+lsusb | grep -i pantum
+Если пусто — принтер не подключён или выключен.
+
+Добавление через веб-CUPS:
+
+Откройте http://localhost:631.
+
+Administration → Add Printer.
+
+В разделе Local Printers должен появиться Pantum P2500-series.
+
+Выберите его → Continue.
+
+Name: Pantum_P2500 (или любое).
+
+Make: Pantum.
+
+Model: Pantum P2500 Series (из установленного PPD).
+
+Add Printer.
+
+Set Default Options → Print Test Page.
+
+Добавление через lpadmin:
+
+lpadmin -p Pantum_P2500 \
+        -v usb://Pantum/P2500-series?serial=XXXX \
+        -m /usr/share/cups/model/pantum/Pantum_P2500_Series.ppd \
+        -E
+URI можно узнать через:
+
+lsusb -v 2>/dev/null | grep -i "iSerial"
+# или
+lpinfo -v 2>/dev/null | grep -i pantum
+
+9.2. Сетевой принтер (Wi-Fi / Ethernet)
+
+Узнать IP принтера:
+
+На самом принтере: распечатать «Network Configuration Page».
+
+В веб-интерфейсе роутера: список DHCP-клиентов.
+
+Через nmap:
+
+nmap -p 9100,631 --open 192.168.1.0/24
+
+Спросить у того, кто настраивал принтер.
+
+Добавление через AppSocket (порт 9100):
+
+lpadmin -p Pantum_P2500 \
+        -v socket://192.168.1.50:9100 \
+        -m /usr/share/cups/model/pantum/Pantum_P2500_Series.ppd \
+        -E
+Добавление через IPP (порт 631):
+
+lpadmin -p Pantum_P2500 \
+        -v ipp://192.168.1.50/ipp/print \
+        -m /usr/share/cups/model/pantum/Pantum_P2500_Series.ppd \
+        -E
+Через веб-CUPS:
+
+http://localhost:631 → Administration → Add Printer.
+
+Выберите AppSocket/HP JetDirect (или Протокол интернет-печати (ipp)).
+
+URI: socket://192.168.1.50:9100 (или ipp://192.168.1.50/ipp/print).
+
+Make: Pantum, Model: Pantum P2500 Series.
+
+Add Printer → Print Test Page.
+
+Проверка доступности:
+
+ping -c 2 192.168.1.50
+nc -zv 192.168.1.50 9100
+nc -zv 192.168.1.50 631
+
+9.3. Принтер, расшаренный с Windows (SMB)
+Если Pantum подключён по USB к Windows-АРМ и расшарен:
+
+Узнать имя шары:
+
+smbclient -L //ИМЯ_АРМ -N
+Вывод покажет список ресурсов, среди них будет принтер (например,
+Pantum_P2500 или HP Laser 103 107 108).
+
+Добавление:
+
+lpadmin -p Pantum_P2500 \
+        -v "smb://ИМЯ_АРМ/Pantum_P2500" \
+        -m /usr/share/cups/model/pantum/Pantum_P2500_Series.ppd \
+        -E
+Через веб-CUPS:
+
+http://localhost:631 → Administration → Add Printer.
+
+Выберите Windows Printer via SAMBA.
+
+URI: smb://ИМЯ_АРМ/ИМЯ_ШАРЫ.
+
+Make: Pantum, Model: Pantum P2500 Series.
+
+Add Printer → Print Test Page.
+
+Проверка:
+
+ping -c 2 ИМЯ_АРМ
+nc -zv ИМЯ_АРМ 445
+smbclient -L //ИМЯ_АРМ -N
+
+9.4. Принтер, подключённый к другому Linux-АРМ (IPP/CUPS)
+
+Если Pantum подключён к Linux-АРМ с CUPS, и тот раздаёт его по IPP:
+
+Узнать URI:
+
+lpstat -h ИМЯ_АРМ:631 -v
+
+Добавление:
+
+lpadmin -p Pantum_P2500 \
+        -v ipp://ИМЯ_АРМ:631/printers/Pantum_P2500 \
+        -m /usr/share/cups/model/pantum/Pantum_P2500_Series.ppd \
+        -E
+
+Через веб-CUPS:
+
+http://localhost:631 → Administration → Add Printer.
+
+Выберите Протокол интернет-печати (ipp).
+
+URI: ipp://ИМЯ_АРМ:631/printers/Pantum_P2500.
+
+Make: Pantum, Model: Pantum P2500 Series.
+
+Add Printer → Print Test Page.
+
+9.5. Через system-config-printer (GUI)
+
+Запустите:
+
+system-config-printer
+
+Добавить → выберите принтер (USB или сеть).
+
+На шаге выбора драйвера:
+
+Make: Pantum.
+
+Model: Pantum P2500 Series.
+
+Или «Указать PPD-файл» → /usr/share/cups/model/pantum/Pantum_P2500_Series.ppd.
+
+Завершите настройку.
+
+Напечатайте тестовую страницу.
+
+10. Проверка и диагностика
+
+10.1. Проверить, что PPD установлен
+
+ls -la /usr/share/cups/model/pantum/
+
+Ожидаемый вывод:
+
+-rw-r--r-- 1 root root 82861 мар  7  2025 Pantum_P2500_Series.ppd
+
+10.2. Проверить, что фильтры установлены
+
+ls -la /usr/lib/cups/filter/ | grep -i pantum
+
+Ожидаемый вывод — исполняемые файлы (-rwxr-xr-x).
+
+10.3. Проверить валидность PPD
+
+head -20 /usr/share/cups/model/pantum/Pantum_P2500_Series.ppd
+
+Должно быть:
+
+*PPD-Adobe: "4.3"
+*Manufacturer: "Pantum"
+*ModelName: "Pantum P2500 Series"
+...
+
+10.4. Проверить, что фильтры, на которые ссылается PPD, существуют
+
+# Какие фильтры вызывает PPD
+grep -oE "/usr/lib/cups/filter/[a-zA-Z0-9_]+" \
+     /usr/share/cups/model/pantum/Pantum_P2500_Series.ppd | sort -u
+
+# Какие фильтры реально есть
+ls /usr/lib/cups/filter/ | grep -i pantum
+Списки должны пересекаться.
+
+10.5. Проверить зависимости фильтров
+
+ldd /usr/lib/cups/filter/pantum_r_raster | grep "not found"
+Если пусто — всё ок. Если есть строки — не хватает библиотек.
+
+10.6. Проверить, что CUPS видит PPD
+Через веб-интерфейс:
+
+http://localhost:631 → Administration → Add Printer.
+
+Выберите любое устройство.
+На шаге Make выберите Pantum.
+На шаге Model поищите P2500.
+Если Pantum P2500 Series в списке — PPD читается.
+
+10.7. Проверить логи CUPS
+
+sudo tail -50 /var/log/cups/error_log
+Ищите строки с Pantum или pantum — там будут ошибки, если что-то не так.
+
+10.8. Проверить, что принтер добавлен
+
+lpstat -p -d
+В списке должна быть ваша очередь (Pantum_P2500).
+
+10.9. Проверить статус очереди
+
+lpstat -p Pantum_P2500 -l
+
+10.10. Отправить тестовую страницу
+
+lp -d Pantum_P2500 /usr/share/cups/data/testprint
+Или:
+
+echo "Hello, Pantum!" | lp -d Pantum_P2500
+
+10.11. Посмотреть очередь заданий
+
+lpstat -o Pantum_P2500
+Если задание «зависло» — смотреть логи CUPS.
+
+11. Возможные проблемы
+
+11.1. ar: файл не найден
+
+Причина: относительный путь + смена рабочего каталога.
+
+Решение: обновите deb2cups до версии 1.0.0+ — там путь преобразуется
+в абсолютный через Path.resolve().
+
+11.2. pantum зависит от libc6, однако пакет libc6 не установлен
+
+Причина: это сообщение от dpkg, если вы пытались ставить .deb вручную.
+deb2cups не использует dpkg, поэтому этой ошибки быть не должно.
+
+Если вы всё же видите её — значит, запускаете не deb2cups, а install.sh
+из комплекта драйвера. Используйте deb2cups вместо него.
+
+11.3. Не найдена команда «ar»
+
+Решение:
+
+sudo apt-get install binutils
+
+11.4. Не найдена команда «ldd»
+
+Решение: установите glibc-utils или аналог. Либо проигнорируйте —
+ldd нужен только для проверки зависимостей.
+
+11.5. Фильтр не работает: not found
+
+Причина: фильтр скомпилирован для Ubuntu и требует библиотек,
+которых нет в ALT Linux.
+
+Решение:
+
+ldd /usr/lib/cups/filter/pantum_r_raster | grep "not found"
+Установите недостающие пакеты через apt-get или найдите аналоги
+в репозиториях ALT Linux.
+
+11.6. CUPS не видит PPD
+
+Причина: CUPS не перезапущен или PPD лежит не там.
+
+Решение:
+
+# Проверить путь
+ls -la /usr/share/cups/model/pantum/
+
+# Перезапустить CUPS
+sudo systemctl restart cups
+
+# Проверить логи
+sudo tail -20 /var/log/cups/error_log
+
+11.7. Принтер не появляется в «Local Printers»
+
+Причина: принтер не подключён по USB к этому АРМ.
+
+Решение:
+
+lsusb | grep -i pantum
+Если пусто — принтер не подключён. Варианты:
+
+Подключить кабель.
+
+Добавить принтер как сетевой (см. раздел 9.2).
+
+Добавить через SMB (см. раздел 9.3).
+
+11.8. 403 Forbidden при обращении к удалённому CUPS
+
+Причина: администратор закрыл удалённый просмотр.
+
+Решение: спросить сисадмина, зайти на сам сервер по SSH/VNC,
+или проверить SMB-шару.
+
+11.9. Filter failed при печати
+
+Причина: фильтр не может обработать задание.
+
+Решение:
+
+sudo tail -50 /var/log/cups/error_log
+Смотреть, какой фильтр упал и почему.
+
+11.10. Задание «висит» в очереди
+
+Причины:
+
+Принтер offline.
+
+Хост (если SMB) выключен.
+
+Сеть недоступна.
+
+Решение:
+
+lpstat -o Pantum_P2500
+lpstat -p Pantum_P2500
+ping -c 2 IP_ПРИНТЕРА
+nc -zv IP_ПРИНТЕРА 9100
+Очистить очередь:
+
+cancel -a Pantum_P2500
+
+12. Удаление и откат
+
+12.1. Удалить принтер из CUPS
+
+lpadmin -x Pantum_P2500
+
+12.2. Удалить PPD и фильтры
+
+# Удалить PPD
+sudo rm -rf /usr/share/cups/model/pantum/
+
+# Удалить фильтры (только те, что ставили)
+sudo rm /usr/lib/cups/filter/pantum_r_* \
+        /usr/lib/cups/filter/CommandFileFilterG2 \
+        /usr/lib/cups/filter/LexHBPFilter \
+        /usr/lib/cups/filter/fax-pnh-filter \
+        /usr/lib/cups/filter/rerouteprintoption
+
+# Перезапустить CUPS
+sudo systemctl restart cups
+
+12.3. Откат из бэкапа
+
+deb2cups сохраняет старые версии файлов в
+/var/backups/deb2cups/deb2cups-YYYYMMDD-HHMMSS/.
+
+Структура:
+
+text
+/var/backups/deb2cups/deb2cups-20260916-114312/
+├── manifest.txt
+└── usr/
+    ├── lib/cups/filter/...
+    └── share/cups/model/...
+Восстановить:
+
+# Посмотреть manifest
+cat /var/backups/deb2cups/deb2cups-20260916-114312/manifest.txt
+
+# Восстановить файлы (пример)
+sudo cp -r /var/backups/deb2cups/deb2cups-20260916-114312/usr/* /usr/
+
+# Перезапустить CUPS
+sudo systemctl restart cups
+
+13. Часто задаваемые вопросы
+
+13.1. Это безопасно?
+
+Да. deb2cups не использует dpkg и не трогает базу пакетов.
+Он просто копирует файлы в системные папки CUPS — те же, куда их положил бы
+dpkg, если бы работал в RPM-системе.
+
+Перед копированием делается бэкап существующих файлов
+(в /var/backups/deb2cups/).
+
+13.2. А если у меня Ubuntu/Debian?
+
+Тогда deb2cups не нужен — ставьте драйвер через dpkg -i или
+apt install ./pantum.deb.
+
+13.3. Можно ли ставить несколько моделей сразу?
+
+Да:
+
+sudo deb2cups \
+    --model "Pantum_P2500_Series" \
+    --model "Pantum_P2500W_Series" \
+    pantum.deb
+Или в интерактивном режиме выбрать несколько номеров через запятую.
+
+13.4. Что делать, если модель не в списке?
+
+Если вашей модели нет в --list — значит, в .deb нет PPD для неё.
+Проверьте:
+
+Тот ли .deb вы скачали (может, это драйвер для другой линейки).
+
+Есть ли модель в списке поддерживаемых на сайте производителя.
+
+Не нужно ли скачать дополнительный .deb (иногда драйверы разбиты
+на пакеты: базовый + модель).
+
+13.5. Принтер работает, но печатает «мусор»
+
+Причина: PPD не соответствует модели или фильтр не справляется.
+
+Решение:
+
+Проверьте, что выбрали правильный PPD:
+
+grep "ModelName" /usr/share/cups/model/pantum/Pantum_P2500_Series.ppd
+Попробуйте другой PPD из той же серии (например, P2500W вместо P2500).
+
+Проверьте логи CUPS.
+
+13.6. Как обновить драйвер?
+
+Просто запустите deb2cups с новым .deb. Он сделает бэкап старых файлов
+и заменит их новыми.
+
+13.7. Как узнать, какие фильтры ставить?
+
+Обычно все — они общие для линейки. Если хочется ставить только нужные:
+
+Выберите PPD.
+
+Посмотрите, какие фильтры он вызывает:
+
+grep -oE "/usr/lib/cups/filter/[a-zA-Z0-9_]+" /usr/share/cups/model/pantum/Pantum_P2500_Series.ppd | sort -u
+Установите только их (вручную).
+
+Но проще ставить все — они занимают мало места и не мешают.
+
+13.8. Где взять .deb для Pantum?
+
+На официальном сайте Pantum, в разделе «Поддержка» → «Драйверы».
+Выбираете модель, ОС «Linux», скачиваете .zip или .deb.
+
+13.9. Работает ли на Fedora / openSUSE?
+
+Да. Утилита не зависит от дистрибутива — ей нужны только ar, tarfile
+и CUPS. Единственное отличие — пути к CUPS могут немного отличаться
+(но в большинстве дистрибутивов это /usr/lib/cups/filter/ и
+/usr/share/cups/model/).
+
+13.10. Можно ли использовать для других принтеров (не Pantum)?
+
+Да. deb2cups не привязан к бренду. Он ищет любые фильтры и PPD
+в .deb. Подойдёт для Kyocera, Brother, Samsung, Canon и т.д., если
+их драйверы выпущены в .deb.
+
+Приложение A. Полезные команды
+
+Проверка принтеров
+
+lpstat -p -d              # список принтеров + по умолчанию
+lpstat -v                 # URI всех принтеров
+lpstat -o                 # активные задания
+lpstat -d                 # принтер по умолчанию
+
+Проверка USB
+
+lsusb                     # все USB-устройства
+lsusb | grep -i pantum    # только Pantum
+
+Проверка сети
+
+ping -c 2 IP              # доступен ли хост
+nc -zv IP 9100            # открыт ли порт AppSocket
+nc -zv IP 631             # открыт ли порт IPP
+nc -zv IP 445             # открыт ли порт SMB
+nmap -p 9100,631 --open 192.168.1.0/24   # поиск принтеров в сети
+
+Проверка SMB
+
+smbclient -L //ИМЯ_АРМ -N     # список ресурсов
+smbclient -L //ИМЯ_АРМ -U пользователь  # с логином
+
+Логи CUPS
+
+sudo tail -50 /var/log/cups/error_log
+sudo tail -50 /var/log/cups/access_log
+
+Управление CUPS
+
+sudo systemctl status cups     # статус
+sudo systemctl restart cups    # перезапуск
+sudo systemctl stop cups       # остановка
+sudo systemctl start cups      # запуск
+
+Управление принтерами
+
+lpadmin -x ИМЯ                 # удалить принтер
+lpadmin -d ИМЯ                 # назначить по умолчанию
+lp -d ИМЯ файл                 # напечатать
+cancel -a ИМЯ                  # очистить очередь
+
+Приложение B. Структура каталогов CUPS
+
+Путь	Назначение
+/usr/lib/cups/filter/	Фильтры (программы преобразования)
+/usr/share/cups/model/	PPD-файлы (описания принтеров)
+/etc/cups/printers.conf	Конфигурация принтеров
+/etc/cups/cupsd.conf	Конфигурация CUPS
+/var/log/cups/error_log	Лог ошибок
+/var/log/cups/access_log	Лог доступа
+/var/spool/cups/	Очередь заданий
+/var/backups/deb2cups/	Бэкапы, созданные deb2cups
+
+Приложение C. Контакты
+
+Автор:   Артем Кашанин
+Город:   Кострома
+Год:     2026
+Email:   koscl@yandex.ru
+Лицензия: MIT
+Если нашли баг или есть предложение — пишите на почту.
+
+Конец справки.
